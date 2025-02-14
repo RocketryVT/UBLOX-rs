@@ -5,15 +5,10 @@
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // #![deny(clippy::float_arithmetic)]
-// #![allow(non_snake_case)]
+#![allow(non_snake_case)]
 
-use defmt::{debug, trace, Format};
+use defmt::Format;
 use embedded_hal_async::{delay::DelayNs, i2c::I2c};
-use libm::powf;
-use uom::si::f32::{Length, Pressure, ThermodynamicTemperature};
-use uom::si::length::{foot, meter};
-use uom::si::pressure::{hectopascal, pascal};
-use uom::si::thermodynamic_temperature::degree_celsius;
 
 mod registers;
 
@@ -46,126 +41,27 @@ impl From<embedded_hal_async::i2c::ErrorKind> for Error<embedded_hal_async::i2c:
     }
 }
 
-// #[derive(Copy, Clone, Debug)]
-// pub struct NavPosVelTimeM8 {
-//     /// GPS time of week of the navigation epoch. (ms)
-//     pub itow: u32,
-//     /// Year (UTC)
-//     pub year: u16,
-//     /// Month, range 1..12 (UTC)
-//     pub month: u8,
-//     /// Day of month, range 1..31 (UTC)
-//     pub day: u8,
-//     /// Hour of day, range 0..23 (UTC)
-//     pub hour: u8,
-//     /// Minute of hour, range 0..59 (UTC)
-//     pub min: u8,
-//     /// Seconds of minute, range 0..60 (UTC)
-//     pub sec: u8,
-//     /// Validity flags
-//     pub validity_flags: u8,
-//     /// Time accuracy estimate (ns UTC)
-//     pub time_accuracy: u32,
-//     /// Fraction of second, range -1e9 .. 1e9 (ns UTC)
-//     pub nanosecond: i32,
-//     /// GNSS fix type:
-//     /// 0 no fix, 1: dead reckoning only, 2: 2D-fix, 3: 3D-fix,
-//     /// 4: GNSS + dead reckoning combined 5: time only fix
-//     pub fix_type: u8,
-//     /// Fix status flags
-//     pub flags: u8,
-//     /// Additional flags
-//     pub flags2: u8,
-//     /// Number of satellites used in Nav Solution
-//     pub num_satellites: u8,
-//     /// Longitude (1e-7 degrees)
-//     pub lon: i32,
-//     /// Latitude (1e-7 degrees)
-//     pub lat: i32,
-//     /// Height above ellipsoid (mm)
-//     pub height: i32,
-//     /// Height above mean sea level (AMSL, mm)
-//     pub height_msl: i32,
-//     /// Horizontal accuracy estimate (mm)
-//     pub h_accuracy: u32,
-//     /// Vertical accuracy estimate (mm)
-//     pub v_accuracy: u32,
-//     /// NED north velocity (mm/s)
-//     pub vel_north: i32,
-//     /// NED east velocity (mm/s)
-//     pub vel_east: i32,
-//     /// NED down velocity (mm/s)
-//     pub vel_down: i32,
-//     /// Ground Speed  (mm/s)
-//     pub ground_speed: i32,
-//     /// 2D Heading of motion (1e-5 degrees)
-//     pub heading_motion: i32,
-//     /// Speed accuracy estimate (mm/s)
-//     pub speed_accuracy: u32,
-//     /// Heading accuracy estimate for both motion and vehicle (degrees)
-//     pub heading_accuracy: u32,
-//     /// Position Dilution of Precision
-//     pub pos_dop: u16,
-//     /// reserved
-//     pub reserved1: [u8; 6],
-//     /// Heading of vehicle (1e-5 degrees)
-//     pub heading_vehicle: i32,
-//     /// Magnetic declination (1e-2 degrees)
-//     pub mag_dec: i16,
-//     /// 90 Magnetic declination accuracy (1e-2 degrees)
-//     pub mag_accuracy: u16,
-// }
-
-// impl Format for NavPosVelTimeM8 {
-//     fn format(&self, f: defmt::Formatter) {
-//         defmt::write!(
-//             f,
-//             "NavPosVelTimeM8 {{ itow: {:?}, year: {:?}, month: {:?}, day: {:?}, hour: {:?}, min: {:?}, sec: {:?}, validity_flags: {:?}, time_accuracy: {:?}, nanosecond: {:?}, fix_type: {:?}, flags: {:?}, flags2: {:?}, num_satellites: {:?}, lon: {:?}, lat: {:?}, height: {:?}, height_msl: {:?}, h_accuracy: {:?}, v_accuracy: {:?}, vel_north: {:?}, vel_east: {:?}, vel_down: {:?}, ground_speed: {:?}, heading_motion: {:?}, speed_accuracy: {:?}, heading_accuracy: {:?}, pos_dop: {:?}, reserved1: {:?}, heading_vehicle: {:?}, mag_dec: {:?}, mag_accuracy: {:?} }}",
-//             self.itow,
-//             self.year,
-//             self.month,
-//             self.day,
-//             self.hour,
-//             self.min,
-//             self.sec,
-//             self.validity_flags,
-//             self.time_accuracy,
-//             self.nanosecond,
-//             self.fix_type,
-//             self.flags,
-//             self.flags2,
-//             self.num_satellites,
-//             self.lon,
-//             self.lat,
-//             self.height,
-//             self.height_msl,
-//             self.h_accuracy,
-//             self.v_accuracy,
-//             self.vel_north,
-//             self.vel_east,
-//             self.vel_down,
-//             self.ground_speed,
-//             self.heading_motion,
-//             self.speed_accuracy,
-//             self.heading_accuracy,
-//             self.pos_dop,
-//             self.reserved1,
-//             self.heading_vehicle,
-//             self.mag_dec,
-//             self.mag_accuracy,
-//         );
-//     }
-// }
-
 #[derive(Debug, Clone, Copy, Format)]
+#[repr(u8)]
 pub enum Address {
     Default = 0x42,
+    Custom(u8),
 }
 
 impl From<Address> for u8 {
     /// Convert the address to a [`u8`] for I2C communication.
     fn from(address: Address) -> u8 {
-        address as u8
+        match address {
+            Address::Default => 0x42,
+            Address::Custom(addr) => addr & 0xFE, // Ensure the least significant bit is 0
+        }
+    }
+}
+
+impl Address {
+    /// Create a new custom address, ensuring the least significant bit is 0.
+    pub fn new_custom(addr: u8) -> Self {
+        Address::Custom(addr & 0xFE)
     }
 }
 
@@ -176,35 +72,126 @@ pub struct Configuration {
     pub output_rtcm: bool,
 }
 
-pub struct DATA {
-    pub buffer: [u8; 2048]
-}
-
-pub struct UBLOX<I> {
+pub struct UBLOX<I, D> {
     /// The I2C bus the barometer is connected to.
     i2c: I,
 
     /// The I2C address of the barometer.
     address: Address,
+
+    /// The devices delay function.
+    delay: D,
 }
 
-impl<I, E> UBLOX<I>
+impl<I, E, D> UBLOX<I, D>
 where
     I: I2c<Error = E>,
+    D: DelayNs,
 {
-    pub async fn try_new<D: DelayNs>(
-        mut i2c: I,
+    pub async fn try_new(
+        i2c: I,
         address: Address,
         mut delay: D,
-        config: &Configuration
+        _config: &Configuration
     ) -> Result<Self, Error<E>> {
         
-        delay.delay_ms(2).await;
+        delay.delay_ms(250).await;
 
-        Ok(Self { i2c, address })
+        Ok(Self { i2c, address, delay })
+    }
+    
+    /// Enable UBX-NAV-UTC messages at 1Hz
+    /// 
+    /// Note: Leap Seconds are broadcasted every 12.5 minutes, so the time will be off by a few seconds until then.
+    /// 
+    /// Note: Converting from GPS time to UTC time is not trivial, so it's best to use the GPS's UTC time rather than converting it yourself.
+    pub async fn enable_ubx_time_utc(&mut self) -> Result<(), Error<E>> {
+
+        let ubx_cfg_valset_ram: [u8; 48] = [
+            0xB5, 0x62, 0x06, 0x8A, 0x28, 0x00, 0x01, 0x01,
+            0x00, 0x00, 0x21, 0x00, 0x11, 0x20, 0x08, 0x06,
+            0x00, 0x93, 0x10, 0x01, 0x01, 0x00, 0x21, 0x30,
+            0xC8, 0x00, 0x02, 0x00, 0x51, 0x10, 0x01, 0x06,
+            0x00, 0x91, 0x20, 0x01, 0x02, 0x00, 0x72, 0x10,
+            0x00, 0x5B, 0x00, 0x91, 0x20, 0x01, 0x85, 0x14
+        ];
+        
+        self.i2c
+            .write(self.address.into(), &ubx_cfg_valset_ram)
+            .await
+            .map_err(Error::I2c)?;
+
+        // Wait for the module to process the command, this takes 100ms for any message
+        // However the effect of the command is not immediate, and each message has its own delay.
+        self.delay.delay_ms(100).await;
+
+        Ok(())
     }
 
-    pub async fn get_data(&mut self) -> Result<Option<DATA>, Error<E>> {
+    pub async fn enable_ubx_nav_pvt(&mut self) -> Result<(), Error<E>> {
+        // Enable UBX-NAV-PVT messages at 1Hz Hex Code generated from U-Center 2
+        // Note: 1Hz is not the real output rate, but the rate that it will output from it's internal navigation filtering.
+        // The documentation for the NEO M8 says that if you set it to '2 Hz' it will actually output every other navigation update.
+        // So in general 1Hz is the best and only setting you should use.
+        // If you want a faster output you need to increase the navigation rate which has a limit of 4Hz. (I tried this but the data was incomplete)
+
+        // This can also be generated from the ublox library, however I'd rather use raw bytes from U-Center for now.
+        let ubx_cfg_valset_ram: [u8; 43] = [
+            0xB5, 0x62, 0x06, 0x8A, 0x23, 0x00,
+            0x01, 0x01, 0x00, 0x00, 0x21, 0x00,
+            0x11, 0x20, 0x08, 0x06, 0x00, 0x93,
+            0x10, 0x01, 0x01, 0x00, 0x21, 0x30,
+            0xC8, 0x00, 0x02, 0x00, 0x51, 0x10,
+            0x01, 0x06, 0x00, 0x91, 0x20, 0x01,
+            0x02, 0x00, 0x72, 0x10, 0x00, 0x73, 0x48
+        ];
+        self.i2c
+            .write(self.address.into(), &ubx_cfg_valset_ram)
+            .await
+            .map_err(Error::I2c)?;
+
+        // Wait for the module to process the command, this takes 100ms for any message
+        // However the effect of the command is not immediate, and each message has its own delay.
+        self.delay.delay_ms(100).await;
+
+        Ok(())
+    }
+
+    // This needs to be changed to request the message type, atm it's a copy of get_data
+    // pub async fn get_ubx_nav_pvt(&mut self) -> Result<Option<[u8; 92]>, Error<E>> {
+    //     // Get the number of bytes available from the module
+    //     let mut buffer = [0u8; 2];
+    //     self.i2c
+    //         .write_read(self.address.into(), &[Register::NUMBER_BYTES_READY_MSB.into()], &mut buffer)
+    //         .await
+    //         .map_err(Error::I2c)?;
+
+    //     let bytes_available = ((buffer[0] as u16) << 8) | buffer[1] as u16;
+    //     if bytes_available == 0 {
+    //         return Ok(None);
+    //     }
+
+    //     // Read up to 128 bytes at a time
+    //     let bytes_to_read = bytes_available.min(128) as usize;
+
+    //     // PVT message is 92 bytes long
+    //     let mut data = [0u8; 92];
+    //     // self.i2c
+    //     //     .write_read(self.address.into(), &[UBX_NAV_PVT[0]], &mut data[0..bytes_to_read as usize])
+    //     //     .await
+    //     //     .map_err(Error::I2c)?;
+    //     self.i2c
+    //         .write_read(self.address.into(), &[0xFF], &mut data[0..bytes_to_read])
+    //         .await
+    //         .map_err(Error::I2c)?;
+
+    //     Ok(Some(data))
+    // }
+
+    /// Get's any queued up data from the generic register 0xFF
+    /// Data streams must be enabled otherwise the module will not send any data
+    /// If you get 0xFF back, then the module is not sending any data or not ready yet so ignore it.
+    pub async fn get_data(&mut self) -> Result<Option<[u8; 128]>, Error<E>> {
         // Get the number of bytes available from the module
         let mut buffer = [0u8; 2];
         self.i2c
@@ -217,13 +204,11 @@ where
             return Ok(None);
         }
 
-        let mut bytes_to_read = bytes_available;
-        if bytes_to_read > 32 {
-            bytes_to_read = 32;
-        }
+        // Step 2: Determine the number of bytes to read (max 128 bytes per transaction)
+        let bytes_to_read = bytes_available.min(128) as usize;
 
         // 2K buffer
-        let mut data = [0u8; 2048];
+        let mut data = [0u8; 128];
         self.i2c.read(self.address.into(), &mut data[0..bytes_to_read as usize])
             .await
             .map_err(Error::I2c)?;
@@ -231,7 +216,7 @@ where
         // for byte in data {
         //     self.process(byte, incoming_ubx, requested_class, requested_id);
         // }
-        Ok(Some(DATA { buffer: data }))
+        Ok(Some(data))
     }
 
     pub async fn is_connected(&mut self) -> Result<bool, Error<E>> {

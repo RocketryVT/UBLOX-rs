@@ -1,5 +1,7 @@
 use defmt::Format;
 
+pub const UBX_NAV_PVT: [u8; 8] = [0xB5, 0x62, 0x01, 0x07, 0x00, 0x00, 0x08, 0x19];
+
 pub struct OutputFormat {
     pub nmea: bool,
     pub ubx: bool,
