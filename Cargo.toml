@@ -31,6 +31,8 @@ path = "src/lib.rs"
 embassy-time = "0.4"
 embedded-hal = "1.0"
 embedded-hal-async = "1.0"
+embedded-io = "0.6"
+embedded-io-async = "0.6"
 libm = "0.2"
 uom = { version="0.36", features = ["f32", "si", "autoconvert"],  default-features = false}
 defmt = { version = "0.3" }

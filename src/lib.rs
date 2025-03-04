@@ -9,6 +9,7 @@
 
 use defmt::Format;
 use embedded_hal_async::{delay::DelayNs, i2c::I2c};
+use embedded_io_async::{Read, Write};
 
 mod registers;
 
@@ -19,6 +20,7 @@ pub use registers::*;
 pub enum Error<E> {
     /// An error occurred while communicating with the BMP390 over I2C. The inner error contains the specific error.
     I2c(E),
+    Uart(E),
 
     // /// The BMP390's chip ID did not match the expected value of `0x60`. The actual chip ID is provided.
     // WrongChip(u8),
@@ -98,6 +100,84 @@ where
         delay.delay_ms(250).await;
 
         Ok(Self { i2c, address, delay })
+    }
+
+// 1: B5 62 06 8A 09 00 01 01 00 00 21 00 11 20 08 F5 5A // CFG-NAVSPG-DYNMODEL-RAM val 8 = Airborne <4g
+// 2: B5 62 06 8A 09 00 01 02 00 00 21 00 11 20 08 F6 62 // CFG-NAVSPG-DYNMODEL-BBR val 8 = Airborne <4g
+// 3: B5 62 06 8A 09 00 01 04 00 00 21 00 11 20 08 F8 72 // CFG-NAVSPG-DYNMODEL-FLASH val 8 = Airborne <4g
+// 4: B5 62 06 8A 09 00 01 01 00 00 06 00 93 10 01 45 32 // CFG-NMEA_HIGHPREC-RAM val 1 = Enable
+// 5: B5 62 06 8A 09 00 01 02 00 00 06 00 93 10 01 46 3A // CFG-NMEA_HIGHPREC-BBR val 1 = Enable
+// 6: B5 62 06 8A 09 00 01 04 00 00 06 00 93 10 01 48 4A // CFG-NMEA_HIGHPREC-FLASH val 1 = Enable
+// 7: B5 62 06 8A 0A 00 01 01 00 00 01 00 21 30 C8 00 B6 8B // CFG-RATE-MEAS-RAM val 200 = 5Hz
+// 8: B5 62 06 8A 0A 00 01 02 00 00 01 00 21 30 C8 00 B7 94 // CFG-RATE-MEAS-BBR val 200 = 5Hz
+// 9: B5 62 06 8A 0A 00 01 04 00 00 01 00 21 30 C8 00 B9 A6 // CFG-RATE-MEAS-FLASH val 200 = 5Hz
+// 10: B5 62 06 8A 09 00 01 01 00 00 02 00 51 10 01 FF 58 // CFG-I2C-EXTENDEDTIMEOUT-RAM val 1 = Enable
+// 11: B5 62 06 8A 09 00 01 02 00 00 02 00 51 10 01 00 60 // CFG-I2C-EXTENDEDTIMEOUT-BBR val 1 = Enable
+// 12: B5 62 06 8A 09 00 01 04 00 00 02 00 51 10 01 02 70 // CFG-I2C-EXTENDEDTIMEOUT-FLASH val 1 = Enable
+// 13: B5 62 06 8A 09 00 01 01 00 00 06 00 91 20 01 53 4C // CFG-MSGOUT-UBX-NAV-PVT-I2C-RAM val 1 = Enable
+// 14: B5 62 06 8A 09 00 01 02 00 00 06 00 91 20 01 54 54 // CFG-MSGOUT-UBX-NAV-PVT-I2C-BBR val 1 = Enable
+// 15: B5 62 06 8A 09 00 01 04 00 00 06 00 91 20 01 56 64 // CFG-MSGOUT-UBX-NAV-PVT-I2C-FLASH val 1 = Enable
+// 16: B5 62 06 8A 09 00 01 01 00 00 02 00 72 10 00 1F BA // CFG-I2COUTPROT-NMEA-RAM val 0 = Off
+// 17: B5 62 06 8A 09 00 01 02 00 00 02 00 72 10 00 20 C2 // CFG-I2COUTPROT-NMEA-BBR val 0 = Off
+// 18: B5 62 06 8A 09 00 01 04 00 00 02 00 72 10 00 22 D2 // CFG-I2COUTPROT-NMEA-FLASH val 0 = Off
+// 19: B5 62 06 8A 09 00 01 01 00 00 5B 00 91 20 01 A8 F5 // CFG-MSGOUT-UBX-NAV-TIMEUTC-I2C-RAM val 1 = Enable
+// 20: B5 62 06 8A 09 00 01 02 00 00 5B 00 91 20 01 A9 FD // CFG-MSGOUT-UBX-NAV-TIMEUTC-I2C-BBR val 1 = Enable
+// 21: B5 62 06 8A 09 00 01 04 00 00 5B 00 91 20 01 AB 0D // CFG-MSGOUT-UBX-NAV-TIMEUTC-I2C-FLASH val 1 = Enable
+
+     // B5 62 06 8A 09 00 01 01 00 00 06 00 91 20 01 53 4C // CFG-MSGOUT-UBX-NAV-PVT-I2C-RAM val 1 = Enable
+     pub async fn enable_i2c_ubx_nav_pvt(&mut self) -> Result<(), Error<E>> {
+        let ubx_cfg_valset_ram: [u8; 17] = [
+            0xB5, 0x62, 0x06, 0x8A, 0x09, 0x00, 0x01, 0x01,
+            0x00, 0x00, 0x06, 0x00, 0x91, 0x20, 0x01, 0x53, 0x4C
+        ];
+        self.i2c
+            .write(self.address.into(), &ubx_cfg_valset_ram)
+            .await
+            .map_err(Error::I2c)?;
+        self.delay.delay_ms(100).await;
+        Ok(())
+    }
+
+    pub async fn set_i2c_timeout_none(&mut self) -> Result<(), Error<E>> {
+        // B5 62 06 8A 09 00 01 01 00 00 02 00 51 10 01 FF 58 // CFG-I2C-EXTENDEDTIMEOUT-RAM val 1 = Enable
+        let ubx_cfg_valset_ram: [u8; 17] = [
+            0xB5, 0x62, 0x06, 0x8A, 0x09, 0x00, 0x01, 0x01,
+            0x00, 0x00, 0x02, 0x00, 0x51, 0x10, 0x01, 0xFF, 0x58
+        ];
+        self.i2c
+            .write(self.address.into(), &ubx_cfg_valset_ram)
+            .await
+            .map_err(Error::I2c)?;
+        self.delay.delay_ms(100).await;
+        Ok(())
+    }
+
+    /// B5 62 06 8A 09 00 01 01 00 00 21 00 11 20 08 F5 5A // CFG-NAVSPG-DYNMODEL-RAM val 8 = Airborne <4g
+    pub async fn set_airborne_4g(&mut self) -> Result<(), Error<E>> {
+        let ubx_cfg_valset_ram: [u8; 17] = [
+            0xB5, 0x62, 0x06, 0x8A, 0x09, 0x00, 0x01, 0x01,
+            0x00, 0x00, 0x21, 0x00, 0x11, 0x20, 0x08, 0xF5, 0x5A
+        ];
+        self.i2c
+            .write(self.address.into(), &ubx_cfg_valset_ram)
+            .await
+            .map_err(Error::I2c)?;
+        self.delay.delay_ms(100).await;
+        Ok(())
+    }
+
+    /// B5 62 06 8A 09 00 01 01 00 00 02 00 72 10 00 1F BA // CFG-I2COUTPROT-NMEA-RAM val 0 = Off
+    pub async fn disable_nmea_i2c(&mut self) -> Result<(), Error<E>> {
+        let ubx_cfg_valset_ram: [u8; 17] = [
+            0xB5, 0x62, 0x06, 0x8A, 0x09, 0x00, 0x01, 0x01,
+            0x00, 0x00, 0x02, 0x00, 0x72, 0x10, 0x00, 0x1F, 0xBA
+        ];
+        self.i2c
+            .write(self.address.into(), &ubx_cfg_valset_ram)
+            .await
+            .map_err(Error::I2c)?;
+        self.delay.delay_ms(100).await;
+        Ok(())
     }
     
     /// Enable UBX-NAV-UTC messages at 1Hz
@@ -259,5 +339,77 @@ where
         // }
         defmt::info!("Data: {:?}", data);
         Ok(true)
+    }
+}
+
+pub struct UbloxUart<U, D> {
+    uart: U,
+    delay: D,
+}
+
+impl<U, E, D> UbloxUart<U, D>
+where
+    U: Read<Error = E> + Write<Error = E>,
+    D: DelayNs,
+{
+    pub async fn try_new(uart: U, mut delay: D) -> Result<Self, Error<E>> {
+        delay.delay_ms(250).await;
+        Ok(Self { uart, delay })
+    }
+
+    pub async fn write(&mut self, data: &[u8]) -> Result<(), Error<E>> {
+        for &byte in data {
+            self.uart.write(&[byte]).await.map_err(Error::Uart)?;
+        }
+        Ok(())
+    }
+
+    pub async fn read(&mut self, buffer: &mut [u8]) -> Result<(), Error<E>> {
+        self.uart.read(buffer).await.map_err(Error::Uart)?;
+        Ok(())
+    }
+
+    /// Enable UBX-NAV-UTC messages at 1Hz
+    /// 
+    /// Note: Leap Seconds are broadcasted every 12.5 minutes, so the time will be off by a few seconds until then.
+    /// 
+    /// Note: Converting from GPS time to UTC time is not trivial, so it's best to use the GPS's UTC time rather than converting it yourself.
+    pub async fn enable_ubx_time_utc(&mut self) -> Result<(), Error<E>> {
+        let ubx_cfg_valset_ram: [u8; 48] = [
+            0xB5, 0x62, 0x06, 0x8A, 0x28, 0x00, 0x01, 0x01,
+            0x00, 0x00, 0x21, 0x00, 0x11, 0x20, 0x08, 0x06,
+            0x00, 0x93, 0x10, 0x01, 0x01, 0x00, 0x21, 0x30,
+            0xC8, 0x00, 0x02, 0x00, 0x51, 0x10, 0x01, 0x06,
+            0x00, 0x91, 0x20, 0x01, 0x02, 0x00, 0x72, 0x10,
+            0x00, 0x5B, 0x00, 0x91, 0x20, 0x01, 0x85, 0x14
+        ];
+        self.write(&ubx_cfg_valset_ram).await?;
+        self.delay.delay_ms(100).await;
+        Ok(())
+    }
+
+    /// Enable UBX-NAV-PVT messages at 1Hz Hex Code generated from U-Center 2
+    /// 
+    /// Note: 1Hz is not the real output rate, but the rate that it will output from it's internal navigation filtering.
+    /// 
+    /// The documentation for the NEO M8 says that if you set it to '2 Hz' it will actually output every other navigation update.
+    /// 
+    /// So in general 1Hz is the best and only setting you should use.
+    /// 
+    /// If you want a faster output you need to increase the navigation rate which has a limit of 4Hz. (I tried this but the data was incomplete)
+    pub async fn enable_ubx_nav_pvt(&mut self) -> Result<(), Error<E>> {
+        // This can also be generated from the ublox library, however I'd rather use raw bytes from U-Center for now.
+        let ubx_cfg_valset_ram: [u8; 43] = [
+            0xB5, 0x62, 0x06, 0x8A, 0x23, 0x00,
+            0x01, 0x01, 0x00, 0x00, 0x21, 0x00,
+            0x11, 0x20, 0x08, 0x06, 0x00, 0x93,
+            0x10, 0x01, 0x01, 0x00, 0x21, 0x30,
+            0xC8, 0x00, 0x02, 0x00, 0x51, 0x10,
+            0x01, 0x06, 0x00, 0x91, 0x20, 0x01,
+            0x02, 0x00, 0x72, 0x10, 0x00, 0x73, 0x48
+        ];
+        self.write(&ubx_cfg_valset_ram).await?;
+        self.delay.delay_ms(100).await;
+        Ok(())
     }
 }
