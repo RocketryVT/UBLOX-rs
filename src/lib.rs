@@ -237,6 +237,21 @@ where
         Ok(())
     }
 
+    pub async fn enable_i2c_ubx_nav_sat(&mut self) -> Result<(), Error<E>> {
+        let ubx_cfg_valset_ram: [u8; 17] = [
+            0xB5, 0x62, 0x06, 0x8A, 0x09, 0x00, 0x01, 0x01, 0x00, 0x00, 0x15, 0x00, 0x91, 0x20, 0x01, 0x62, 0x97
+        ];
+
+        self.i2c
+            .write(self.address.into(), &ubx_cfg_valset_ram)
+            .await
+            .map_err(Error::I2c)?;
+
+        self.delay.delay_ms(100).await;
+
+        Ok(())
+    }
+
     // This needs to be changed to request the message type, atm it's a copy of get_data
     // pub async fn get_ubx_nav_pvt(&mut self) -> Result<Option<[u8; 92]>, Error<E>> {
     //     // Get the number of bytes available from the module
